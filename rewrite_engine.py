@@ -37,6 +37,10 @@ VERIFIED_FROM_EMAIL = "results@tryresumerocket.com"
 MONITORED_DOMAIN = "tryresumerocket.com"
 GMAIL_USER = os.environ.get("GMAIL_USER", "dsherburn@gmail.com")
 GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
+REDDIT_CLIENT_ID = os.environ.get("REDDIT_CLIENT_ID", "")
+REDDIT_CLIENT_SECRET = os.environ.get("REDDIT_CLIENT_SECRET", "")
+REDDIT_USERNAME = os.environ.get("REDDIT_USERNAME", "")
+REDDIT_PASSWORD = os.environ.get("REDDIT_PASSWORD", "")
 
 _last_error: dict = {}
 _orders_processed: int = 0
@@ -734,6 +738,58 @@ def status():
         "orders_failed_session": failed,
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
     }), 200
+
+
+@app.route("/reddit-post", methods=["POST"])
+def reddit_post():
+    """Post or comment to Reddit using stored credentials. Body: {subreddit, title, body, kind} where kind is 'post' or 'comment'. For comment, pass {subreddit, parent_url, body, kind:'comment'}."""
+    if not all([REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_USERNAME, REDDIT_PASSWORD]):
+        return jsonify({"error": "Reddit credentials not configured. Set REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_USERNAME, REDDIT_PASSWORD env vars."}), 503
+    try:
+        payload = request.get_json(force=True) or {}
+        kind = payload.get("kind", "post")
+        subreddit = payload.get("subreddit", "")
+        # Get OAuth token via password flow
+        auth_resp = httpx.post(
+            "https://www.reddit.com/api/v1/access_token",
+            auth=(REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET),
+            data={"grant_type": "password", "username": REDDIT_USERNAME, "password": REDDIT_PASSWORD},
+            headers={"User-Agent": f"ResumeRocketBot/1.0 by {REDDIT_USERNAME}"},
+            timeout=15,
+        )
+        if auth_resp.status_code != 200:
+            return jsonify({"error": f"Reddit auth failed: {auth_resp.status_code}", "detail": auth_resp.text[:200]}), 502
+        token = auth_resp.json().get("access_token")
+        headers = {
+            "Authorization": f"bearer {token}",
+            "User-Agent": f"ResumeRocketBot/1.0 by {REDDIT_USERNAME}",
+        }
+        if kind == "post":
+            resp = httpx.post(
+                "https://oauth.reddit.com/api/submit",
+                headers=headers,
+                data={
+                    "sr": subreddit,
+                    "kind": "self",
+                    "title": payload.get("title", ""),
+                    "text": payload.get("body", ""),
+                    "nsfw": False,
+                    "spoiler": False,
+                    "resubmit": True,
+                },
+                timeout=20,
+            )
+        else:
+            resp = httpx.post(
+                "https://oauth.reddit.com/api/comment",
+                headers=headers,
+                data={"parent": payload.get("parent_fullname", ""), "text": payload.get("body", "")},
+                timeout=20,
+            )
+        result = resp.json() if resp.status_code == 200 else {"error": resp.status_code, "detail": resp.text[:300]}
+        return jsonify({"status": resp.status_code, "result": result}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":
