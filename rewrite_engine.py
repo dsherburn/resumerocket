@@ -145,11 +145,20 @@ def optimize_linkedin(
     return message.content[0].text
 
 
+_UNICODE_MAP = {
+    '—': '--', '–': '-', '‒': '-',
+    '‘': "'", '’': "'", '‚': "'",
+    '“': '"', '”': '"', '„': '"',
+    '…': '...', '·': '-', '•': '-',
+}
+
 def _plain(text: str) -> str:
-    """Strip markdown bold/italic markers for plain-text PDF rendering."""
+    """Strip markdown markers and normalize to latin-1 safe text for fpdf2."""
     text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)
     text = re.sub(r'\*(.*?)\*', r'\1', text)
-    return text
+    for ch, rep in _UNICODE_MAP.items():
+        text = text.replace(ch, rep)
+    return text.encode('latin-1', 'replace').decode('latin-1')
 
 
 def markdown_to_pdf(md: str) -> bytes:
@@ -234,13 +243,16 @@ def send_delivery_email(
     <p>Good luck,<br/>ResumeRocket</p>
     """
 
-    resume_pdf = markdown_to_pdf(rewritten_resume)
-    attachments = [
-        {
-            "filename": "resume_rewritten.pdf",
-            "content": base64.b64encode(resume_pdf).decode(),
-        }
-    ]
+    try:
+        resume_pdf = markdown_to_pdf(rewritten_resume)
+        attach_name = "resume_rewritten.pdf"
+        attach_data = base64.b64encode(resume_pdf).decode()
+    except Exception as pdf_err:
+        print(f"PDF generation failed ({type(pdf_err).__name__}: {pdf_err}), sending as text")
+        attach_name = "resume_rewritten.txt"
+        attach_data = base64.b64encode(rewritten_resume.encode("utf-8")).decode()
+
+    attachments = [{"filename": attach_name, "content": attach_data}]
 
     if linkedin_copy:
         attachments.append({
