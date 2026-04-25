@@ -35,6 +35,8 @@ FROM_EMAIL = os.environ.get("FROM_EMAIL", "onboarding@resend.dev")
 FALLBACK_FROM_EMAIL = "onboarding@resend.dev"
 VERIFIED_FROM_EMAIL = "results@tryresumerocket.com"
 MONITORED_DOMAIN = "tryresumerocket.com"
+GMAIL_USER = os.environ.get("GMAIL_USER", "dsherburn@gmail.com")
+GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
 
 _last_error: dict = {}
 _orders_processed: int = 0
@@ -327,13 +329,33 @@ def markdown_to_pdf(md: str) -> bytes:
     return bytes(pdf.output())
 
 
+def _send_via_gmail(to_email: str, subject: str, body_html: str, attachments: list) -> None:
+    """Send email via Gmail SMTP using an app password. No domain verification needed."""
+    msg = MIMEMultipart("mixed")
+    msg["From"] = f"ResumeRocket <{GMAIL_USER}>"
+    msg["To"] = to_email
+    msg["Subject"] = subject
+    msg["Reply-To"] = "support@tryresumerocket.com"
+    msg.attach(MIMEText(body_html, "html"))
+    for att in attachments:
+        part = MIMEBase("application", "octet-stream")
+        part.set_payload(base64.b64decode(att["content"]))
+        encoders.encode_base64(part)
+        part.add_header("Content-Disposition", f'attachment; filename="{att["filename"]}"')
+        msg.attach(part)
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
+        server.sendmail(GMAIL_USER, to_email, msg.as_string())
+    print(f"Delivered via Gmail SMTP to {to_email}")
+
+
 def send_delivery_email(
     customer_email: str,
     customer_name: str,
     rewritten_resume: str,
     linkedin_copy: str | None = None,
 ) -> bool:
-    """Send the completed deliverables via Resend API. Returns True on direct delivery, False on fallback."""
+    """Send the completed deliverables. Tries Gmail SMTP first, then Resend, then owner fallback."""
     subject = "Your ResumeRocket rewrite is ready 🚀"
 
     # Always embed the formatted resume in the email body
@@ -372,6 +394,11 @@ def send_delivery_email(
         print("PDF attachment generated successfully")
     except Exception as pdf_err:
         print(f"PDF generation skipped ({type(pdf_err).__name__}: {pdf_err}) - resume in email body")
+
+    # Gmail SMTP - bypasses Resend domain verification entirely
+    if GMAIL_APP_PASSWORD:
+        _send_via_gmail(customer_email, subject, body_html, attachments)
+        return True
 
     payload = {
         "from": FROM_EMAIL,
