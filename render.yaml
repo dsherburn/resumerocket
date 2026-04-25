@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: resumerocket
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: TALLY_SECRET
+        sync: false
+      - key: FROM_EMAIL
+        value: results@tryresumerocket.com
