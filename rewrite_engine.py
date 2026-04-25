@@ -638,6 +638,31 @@ def last_error():
     return jsonify(_last_error if _last_error else {"message": "no errors recorded"}), 200
 
 
+@app.route("/trigger-verify", methods=["POST"])
+def trigger_verify():
+    """Tell Resend to re-check DNS and verify the domain."""
+    try:
+        r = httpx.get(
+            "https://api.resend.com/domains",
+            headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
+            timeout=10,
+        )
+        if r.status_code != 200:
+            return jsonify({"error": f"Could not list domains: HTTP {r.status_code}"}), 500
+        domains = r.json().get("data", [])
+        domain_id = next((d["id"] for d in domains if d.get("name") == MONITORED_DOMAIN), None)
+        if not domain_id:
+            return jsonify({"error": f"{MONITORED_DOMAIN} not found in Resend account", "domains": [d.get("name") for d in domains]}), 404
+        vr = httpx.post(
+            f"https://api.resend.com/domains/{domain_id}/verify",
+            headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
+            timeout=10,
+        )
+        return jsonify({"domain_id": domain_id, "verify_status": vr.status_code, "verify_body": vr.json()}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 def _check_resend_domain() -> tuple[bool, bool]:
     """Returns (resend_ok, domain_verified). Also auto-upgrades FROM_EMAIL when verified."""
     global FROM_EMAIL
