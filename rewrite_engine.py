@@ -241,66 +241,91 @@ def process_order(order: dict) -> None:
 # --- Webhook handler (Flask) ---
 # Drop this behind a Vercel serverless function or Railway app
 
+import threading
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
 
+def get_field(raw_fields, label_fragment: str):
+    """Find a field value by partial label match (case-insensitive)."""
+    label_fragment = label_fragment.lower()
+    for f in raw_fields:
+        if label_fragment in f.get("label", "").lower():
+            return f.get("value")
+    return None
+
+
+def process_tally_payload(payload: dict) -> None:
+    """Parse Tally payload and run the order pipeline. Runs in a background thread."""
+    try:
+        print("Tally payload keys:", list(payload.keys()))
+
+        # Tally wraps fields under payload["data"]["fields"]
+        raw_fields = (
+            payload.get("data", {}).get("fields", [])
+            or payload.get("fields", [])
+        )
+        print(f"Found {len(raw_fields)} fields:")
+        for f in raw_fields:
+            print(f"  label={f.get('label')!r}  type={f.get('type')}  value_type={type(f.get('value')).__name__}")
+
+        # File upload
+        resume_files = get_field(raw_fields, "resume") or get_field(raw_fields, "upload")
+        if not isinstance(resume_files, list) or not resume_files:
+            print("ERROR: No resume file found in fields")
+            return
+
+        file_obj = resume_files[0]
+        file_url = file_obj.get("url", "")
+        if not file_url:
+            print("ERROR: File object has no URL:", file_obj)
+            return
+
+        print(f"Downloading resume from {file_url}")
+        file_resp = httpx.get(file_url, timeout=60)
+        file_resp.raise_for_status()
+
+        customer_name = get_field(raw_fields, "name") or get_field(raw_fields, "full") or "Customer"
+        if isinstance(customer_name, list):
+            customer_name = customer_name[0] if customer_name else "Customer"
+
+        order = {
+            "customer_email": get_field(raw_fields, "email") or "",
+            "customer_name": str(customer_name),
+            "target_role": get_field(raw_fields, "role") or get_field(raw_fields, "targeting") or "",
+            "career_level": get_field(raw_fields, "career level") or get_field(raw_fields, "level") or "IC",
+            "key_achievement": get_field(raw_fields, "achievement") or "",
+            "resume_file_content": file_resp.content,
+            "resume_filename": file_obj.get("name", "resume.pdf"),
+            "linkedin_url": get_field(raw_fields, "linkedin"),
+            "bundle": False,
+        }
+
+        print(f"Order built: email={order['customer_email']} role={order['target_role']}")
+        process_order(order)
+
+    except Exception as e:
+        print(f"ERROR in process_tally_payload: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+
+
 @app.route("/webhook/tally", methods=["POST"])
 def tally_webhook():
-    """Receives Tally form submission. Tally sends fields under data.fields with
-    auto-generated keys -- we match by label (case-insensitive) instead."""
+    """Receives Tally form submission and immediately returns 200.
+    Processing happens in a background thread so Tally never times out."""
     payload = request.get_json(force=True)
-    print("Tally payload keys:", list(payload.keys()))
+    # Acknowledge immediately -- Claude rewrite takes 30-60s, Tally would time out
+    thread = threading.Thread(target=process_tally_payload, args=(payload,))
+    thread.daemon = True
+    thread.start()
+    return jsonify({"status": "accepted"}), 200
 
-    # Tally wraps fields under payload["data"]["fields"]
-    raw_fields = (
-        payload.get("data", {}).get("fields", [])
-        or payload.get("fields", [])
-    )
-    print(f"Found {len(raw_fields)} fields")
 
-    def get_field(label_fragment: str):
-        """Find a field value by partial label match (case-insensitive)."""
-        label_fragment = label_fragment.lower()
-        for f in raw_fields:
-            if label_fragment in f.get("label", "").lower():
-                return f.get("value")
-        return None
-
-    # Extract file upload -- Tally returns a list of file objects
-    resume_files = get_field("resume") or get_field("upload")
-    if not isinstance(resume_files, list) or not resume_files:
-        print("No resume file found in payload. Fields:", [(f.get("label"), type(f.get("value")).__name__) for f in raw_fields])
-        return jsonify({"error": "No resume file"}), 400
-
-    file_obj = resume_files[0]
-    file_url = file_obj.get("url", "")
-    if not file_url:
-        return jsonify({"error": "No file URL"}), 400
-
-    file_resp = httpx.get(file_url, timeout=30)
-    file_resp.raise_for_status()
-
-    customer_name = get_field("name") or get_field("full") or "Customer"
-    if isinstance(customer_name, list):
-        customer_name = customer_name[0] if customer_name else "Customer"
-
-    order = {
-        "customer_email": get_field("email") or "",
-        "customer_name": str(customer_name),
-        "target_role": get_field("role") or get_field("targeting") or "",
-        "career_level": get_field("career level") or get_field("level") or "IC",
-        "key_achievement": get_field("achievement") or "",
-        "resume_file_content": file_resp.content,
-        "resume_filename": file_obj.get("name", "resume.pdf"),
-        "linkedin_url": get_field("linkedin"),
-        "bundle": False,
-    }
-
-    print(f"Processing order for {order['customer_email']} — role: {order['target_role']}")
-    process_order(order)
-    return jsonify({"status": "delivered"}), 200
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({"status": "ok"}), 200
 
 
 if __name__ == "__main__":
