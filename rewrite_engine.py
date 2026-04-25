@@ -29,7 +29,7 @@ try:
 except ImportError:
     _FPDF_AVAILABLE = False
 
-ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 FROM_EMAIL = os.environ.get("FROM_EMAIL", "onboarding@resend.dev")
 FALLBACK_FROM_EMAIL = "onboarding@resend.dev"
