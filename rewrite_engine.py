@@ -640,7 +640,7 @@ def last_error():
 
 @app.route("/trigger-verify", methods=["POST"])
 def trigger_verify():
-    """Tell Resend to re-check DNS and verify the domain."""
+    """Tell Resend to re-check DNS and verify the domain. Returns full domain record."""
     try:
         r = httpx.get(
             "https://api.resend.com/domains",
@@ -658,7 +658,17 @@ def trigger_verify():
             headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
             timeout=10,
         )
-        return jsonify({"domain_id": domain_id, "verify_status": vr.status_code, "verify_body": vr.json()}), 200
+        # Fetch full domain details to see which records are verified
+        dr = httpx.get(
+            f"https://api.resend.com/domains/{domain_id}",
+            headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
+            timeout=10,
+        )
+        return jsonify({
+            "domain_id": domain_id,
+            "verify_status": vr.status_code,
+            "domain_details": dr.json() if dr.status_code == 200 else {"error": dr.status_code},
+        }), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
