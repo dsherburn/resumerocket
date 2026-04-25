@@ -491,6 +491,30 @@ def health():
     return jsonify({"status": "ok"}), 200
 
 
+@app.route("/diagnose", methods=["GET"])
+def diagnose():
+    """Check all service dependencies are reachable and keys are valid."""
+    results = {}
+    # Anthropic key
+    try:
+        import anthropic as _ant
+        c = _ant.Anthropic(api_key=ANTHROPIC_API_KEY)
+        c.messages.create(model="claude-haiku-4-5-20251001", max_tokens=5, messages=[{"role": "user", "content": "ping"}])
+        results["anthropic"] = "ok"
+    except Exception as e:
+        results["anthropic"] = f"ERROR: {type(e).__name__}: {str(e)[:120]}"
+    # Resend key
+    try:
+        import httpx as _hx
+        r = _hx.get("https://api.resend.com/domains", headers={"Authorization": f"Bearer {RESEND_API_KEY}"}, timeout=10)
+        results["resend"] = "ok" if r.status_code == 200 else f"HTTP {r.status_code}"
+    except Exception as e:
+        results["resend"] = f"ERROR: {str(e)[:80]}"
+    results["from_email"] = FROM_EMAIL
+    results["anthropic_key_prefix"] = ANTHROPIC_API_KEY[:20] + "..." if ANTHROPIC_API_KEY else "NOT SET"
+    return jsonify(results), 200
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     app.run(debug=False, host="0.0.0.0", port=port)
