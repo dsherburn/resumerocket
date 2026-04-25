@@ -1,0 +1,23 @@
+John Smith
+john.smith@email.com | LinkedIn: linkedin.com/in/johnsmith | (555) 123-4567
+
+SUMMARY
+Product leader with 8 years of experience driving growth at B2B SaaS companies. Track record of shipping products that generate revenue and reduce churn.
+
+EXPERIENCE
+Senior Product Manager - Acme Corp (2020-2024)
+- Responsible for product roadmap
+- Worked on improving user onboarding
+- Helped with customer success team initiatives
+- Assisted in driving revenue growth
+
+Product Manager - StartupXYZ (2017-2020)
+- Worked on mobile app features
+- Responsible for analytics dashboard
+- Helped reduce customer churn
+
+EDUCATION
+B.S. Computer Science - State University (2017)
+
+SKILLS
+Product Strategy, Roadmapping, SQL, Figma, Jira, A/B Testing
