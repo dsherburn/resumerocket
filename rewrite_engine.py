@@ -41,6 +41,7 @@ REDDIT_CLIENT_ID = os.environ.get("REDDIT_CLIENT_ID", "")
 REDDIT_CLIENT_SECRET = os.environ.get("REDDIT_CLIENT_SECRET", "")
 REDDIT_USERNAME = os.environ.get("REDDIT_USERNAME", "")
 REDDIT_PASSWORD = os.environ.get("REDDIT_PASSWORD", "")
+REDDIT_SESSION_TOKEN = os.environ.get("REDDIT_SESSION_TOKEN", "")
 
 _last_error: dict = {}
 _orders_processed: int = 0
@@ -794,18 +795,48 @@ def reddit_post():
 
 @app.route("/reddit-web-post", methods=["POST"])
 def reddit_web_post():
-    """Post to Reddit using web session (no OAuth app needed). Body: {subreddit, title, body, username?, password?}."""
+    """Post to Reddit. Body: {subreddit, title, body, session_token?}. session_token takes priority over login flow."""
     try:
         payload = request.get_json(force=True) or {}
-        reddit_user = payload.get("username") or REDDIT_USERNAME
-        reddit_pass = payload.get("password") or REDDIT_PASSWORD
-        if not all([reddit_user, reddit_pass]):
-            return jsonify({"error": "username/password required in body or env vars"}), 503
         subreddit = payload.get("subreddit", "")
         title = payload.get("title", "")
         body = payload.get("body", "")
         if not all([subreddit, title, body]):
             return jsonify({"error": "subreddit, title, and body are required"}), 400
+
+        token = payload.get("session_token") or REDDIT_SESSION_TOKEN
+
+        if token:
+            # Direct bearer token path -- no login needed
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "User-Agent": f"ResumeRocketBot/1.0 by {REDDIT_USERNAME or 'resumerocket'}",
+            }
+            me = httpx.get("https://oauth.reddit.com/api/v1/me", headers=headers, timeout=15)
+            if me.status_code != 200:
+                return jsonify({"error": "session_token invalid or expired", "me_status": me.status_code}), 401
+            modhash = me.json().get("modhash", "")
+            submit_resp = httpx.post(
+                "https://oauth.reddit.com/api/submit",
+                headers=headers,
+                data={
+                    "sr": subreddit, "kind": "self", "title": title, "text": body,
+                    "nsfw": "false", "spoiler": "false", "resubmit": "true", "api_type": "json",
+                    "uh": modhash,
+                },
+                timeout=20,
+            )
+            try:
+                result = submit_resp.json()
+            except Exception:
+                result = {"raw": submit_resp.text[:500]}
+            return jsonify({"status": submit_resp.status_code, "auth": "session_token", "result": result}), 200
+
+        # Fallback: username/password web session
+        reddit_user = payload.get("username") or REDDIT_USERNAME
+        reddit_pass = payload.get("password") or REDDIT_PASSWORD
+        if not all([reddit_user, reddit_pass]):
+            return jsonify({"error": "session_token or username/password required"}), 503
 
         session = httpx.Client(
             headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"},
@@ -813,7 +844,6 @@ def reddit_web_post():
             timeout=30,
         )
 
-        # Step 1: Get login page to extract CSRF token
         login_page = session.get("https://www.reddit.com/login")
         csrf = None
         import re as _re
@@ -821,13 +851,11 @@ def reddit_web_post():
         if csrf_match:
             csrf = csrf_match.group(1)
 
-        # Step 2: Login
         login_data = {"username": reddit_user, "password": reddit_pass, "dest": "https://www.reddit.com"}
         if csrf:
             login_data["csrf_token"] = csrf
         login_resp = session.post("https://www.reddit.com/login", data=login_data)
 
-        # Step 3: Get bearer token from cookies or response
         token = None
         for cookie in session.cookies.jar:
             if cookie.name == "token_v2":
@@ -835,37 +863,26 @@ def reddit_web_post():
                 break
 
         if not token:
-            # Try getting token from the account endpoint
             me_resp = session.get("https://www.reddit.com/api/me.json")
             if me_resp.status_code != 200 or "error" in me_resp.text.lower()[:100]:
                 return jsonify({"error": "Login failed", "login_status": login_resp.status_code, "detail": login_resp.text[:200]}), 401
 
-        # Step 4: Submit post via API
         submit_headers = {"X-Modhash": ""}
         if token:
             submit_headers["Authorization"] = f"Bearer {token}"
 
-        # Get modhash
         prefs_resp = session.get("https://www.reddit.com/api/me.json")
         modhash = ""
         try:
-            prefs_data = prefs_resp.json()
-            modhash = prefs_data.get("data", {}).get("modhash", "")
+            modhash = prefs_resp.json().get("data", {}).get("modhash", "")
         except Exception:
             pass
 
         submit_resp = session.post(
             "https://www.reddit.com/api/submit",
             data={
-                "sr": subreddit,
-                "kind": "self",
-                "title": title,
-                "text": body,
-                "nsfw": "false",
-                "spoiler": "false",
-                "resubmit": "true",
-                "api_type": "json",
-                "uh": modhash,
+                "sr": subreddit, "kind": "self", "title": title, "text": body,
+                "nsfw": "false", "spoiler": "false", "resubmit": "true", "api_type": "json", "uh": modhash,
             },
         )
 
@@ -874,11 +891,7 @@ def reddit_web_post():
         except Exception:
             result = {"raw": submit_resp.text[:500]}
 
-        return jsonify({
-            "status": submit_resp.status_code,
-            "modhash": modhash[:8] + "..." if modhash else None,
-            "result": result,
-        }), 200
+        return jsonify({"status": submit_resp.status_code, "auth": "web_session", "result": result}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
