@@ -27,21 +27,42 @@ except ImportError:
 
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
-FROM_EMAIL = os.environ.get("FROM_EMAIL", "results@tryresumerocket.com")
+FROM_EMAIL = os.environ.get("FROM_EMAIL", "onboarding@resend.dev")
+FALLBACK_FROM_EMAIL = "onboarding@resend.dev"
 
-RESUME_SYSTEM_PROMPT = """You are an expert resume writer with 15 years of experience helping professionals land roles at top companies. You write in clear, concise, achievement-focused language with strong action verbs and quantified results wherever possible.
+_last_error: dict = {}
+
+RESUME_SYSTEM_PROMPT = """You are an expert resume writer with 15 years of experience helping professionals land roles at top companies. You write clear, concise, achievement-focused resumes that pass ATS screening and impress hiring managers.
 
 Your task: Rewrite the provided resume to maximize interview callbacks for the stated target role.
 
-Rules:
-- Keep all facts accurate — never invent achievements or numbers
-- Lead every bullet with a strong action verb (Delivered, Drove, Built, Reduced, Increased, Led, Designed, etc.)
-- Quantify impact where numbers exist in the original (revenue, %, headcount, time saved, etc.)
+FORMAT & STRUCTURE:
+- Single-column layout only - no tables, text boxes, columns, headers/footers, or graphics
+- Standard section headings: Summary, Experience, Education, Skills, Certifications
+- Standard fonts only (Arial, Helvetica, Calibri, Georgia) - do not specify fonts in markdown output
+- 1 page for under 10 years experience; 2 pages max for senior roles
+- Deliver as clean markdown that can be converted to both .docx and .pdf
+
+CONTENT RULES:
+- Keep all facts accurate - never invent achievements or numbers
+- Lead with a 2-4 line professional summary tailored to the target role (not an objective statement)
+- Every bullet: strong action verb + what you did + measurable result/impact. Quantify wherever possible (%, $, time saved, team size, scale)
+- Prioritize accomplishments over responsibilities - cut generic duties
 - Remove filler phrases: "responsible for", "worked on", "helped with", "assisted in"
-- Optimize for ATS keyword matching for the target role — include relevant keywords naturally
-- Output format: clean markdown mirroring standard resume structure (Name, Contact, Summary, Experience, Education, Skills)
-- Max length: 1 page for <10 years experience, 2 pages for 10+ years
-- Write a 3-sentence summary at the top that positions the candidate for the target role
+- Mirror keywords and phrases from the target role naturally throughout (especially in Skills and Experience)
+- Reverse-chronological order for experience
+- Remove: photos, full mailing address, references, "References available upon request"
+- Location: city + state or "Remote" only - no street address
+- Include LinkedIn URL and GitHub/portfolio if mentioned in original
+- Skills section: clean list of relevant hard skills, tools, technologies only - no skill bars or ratings
+- Match tone to industry (creative roles can be slightly more expressive; finance/legal/corporate stay conservative)
+
+BEFORE FINALIZING:
+1. Resume is tailored to the specific target role (not generic)
+2. Every bullet has a measurable outcome where possible
+3. No typos, inconsistent verb tenses, or formatting inconsistencies
+4. Would parse cleanly in ATS (no images, tables, fancy formatting)
+5. Most relevant experience and keywords appear in top third of page one
 
 Target role: {target_role}
 Career level: {career_level}
@@ -349,6 +370,18 @@ def send_delivery_email(
         json=payload,
         timeout=30,
     )
+    if resp.status_code == 403 and FROM_EMAIL != FALLBACK_FROM_EMAIL:
+        print(f"Domain not verified for {FROM_EMAIL}, retrying with {FALLBACK_FROM_EMAIL}")
+        payload["from"] = FALLBACK_FROM_EMAIL
+        resp = httpx.post(
+            "https://api.resend.com/emails",
+            headers={
+                "Authorization": f"Bearer {RESEND_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=30,
+        )
     resp.raise_for_status()
 
 
@@ -469,9 +502,13 @@ def process_tally_payload(payload: dict) -> None:
         process_order(order)
 
     except Exception as e:
-        print(f"ERROR in process_tally_payload: {type(e).__name__}: {e}")
-        import traceback
+        import traceback, datetime
+        err_msg = f"{type(e).__name__}: {e}"
+        print(f"ERROR in process_tally_payload: {err_msg}")
         traceback.print_exc()
+        _last_error["message"] = err_msg
+        _last_error["traceback"] = traceback.format_exc()
+        _last_error["at"] = datetime.datetime.utcnow().isoformat()
 
 
 @app.route("/webhook/tally", methods=["POST"])
@@ -511,8 +548,15 @@ def diagnose():
     except Exception as e:
         results["resend"] = f"ERROR: {str(e)[:80]}"
     results["from_email"] = FROM_EMAIL
+    results["fallback_from_email"] = FALLBACK_FROM_EMAIL
     results["anthropic_key_prefix"] = ANTHROPIC_API_KEY[:20] + "..." if ANTHROPIC_API_KEY else "NOT SET"
+    results["last_error"] = _last_error if _last_error else None
     return jsonify(results), 200
+
+
+@app.route("/last-error", methods=["GET"])
+def last_error():
+    return jsonify(_last_error if _last_error else {"message": "no errors recorded"}), 200
 
 
 if __name__ == "__main__":
