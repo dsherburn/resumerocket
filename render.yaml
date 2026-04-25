@@ -3,7 +3,7 @@ services:
     name: resumerocket-backend
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: python rewrite_engine.py to startCommand: gunicorn rewrite_engine:app
+    startCommand: startCommand: gunicorn rewrite_engine:app
     envVars:
       - key: ANTHROPIC_API_KEY
         sync: false
