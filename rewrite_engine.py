@@ -14,17 +14,11 @@ from email import encoders
 from io import BytesIO
 from pathlib import Path
 
-import html
 import re
 
 import anthropic
 import httpx
-from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.styles import ParagraphStyle
-from reportlab.lib.units import inch
-from reportlab.platypus import HRFlowable, Paragraph, SimpleDocTemplate, Spacer
+from fpdf import FPDF
 
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
@@ -151,37 +145,22 @@ def optimize_linkedin(
     return message.content[0].text
 
 
-def _md_inline(text: str) -> str:
-    """Escape HTML then convert **bold** and *italic* to reportlab XML tags."""
-    text = html.escape(text)
-    text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
-    text = re.sub(r'\*(.*?)\*', r'<i>\1</i>', text)
+def _plain(text: str) -> str:
+    """Strip markdown bold/italic markers for plain-text PDF rendering."""
+    text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)
+    text = re.sub(r'\*(.*?)\*', r'\1', text)
     return text
 
 
 def markdown_to_pdf(md: str) -> bytes:
-    """Convert markdown resume text to a formatted PDF."""
-    buf = BytesIO()
-    doc = SimpleDocTemplate(
-        buf, pagesize=letter,
-        rightMargin=0.75 * inch, leftMargin=0.75 * inch,
-        topMargin=0.75 * inch, bottomMargin=0.75 * inch,
-    )
+    """Convert markdown resume text to a formatted PDF using fpdf2."""
+    pdf = FPDF(format="Letter")
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=19)
 
-    name_s = ParagraphStyle("name", fontSize=20, fontName="Helvetica-Bold",
-                            alignment=TA_CENTER, spaceAfter=2)
-    contact_s = ParagraphStyle("contact", fontSize=9, fontName="Helvetica",
-                               alignment=TA_CENTER, spaceAfter=6,
-                               textColor=colors.HexColor("#555555"))
-    h2_s = ParagraphStyle("h2", fontSize=10.5, fontName="Helvetica-Bold",
-                          spaceBefore=10, spaceAfter=2)
-    h3_s = ParagraphStyle("h3", fontSize=10, fontName="Helvetica-Bold",
-                          spaceBefore=5, spaceAfter=1)
-    bullet_s = ParagraphStyle("bullet", fontSize=9.5, leftIndent=14,
-                              spaceAfter=1, spaceBefore=1)
-    body_s = ParagraphStyle("body", fontSize=9.5, spaceAfter=3)
+    L = 19        # left margin ~0.75"
+    W = pdf.w - 2 * L
 
-    story = []
     in_name_block = True
 
     for line in md.strip().splitlines():
@@ -190,26 +169,48 @@ def markdown_to_pdf(md: str) -> bytes:
             continue
 
         if stripped.startswith("# "):
-            story.append(Paragraph(_md_inline(stripped[2:].strip()), name_s))
+            pdf.set_font("Helvetica", "B", 20)
+            pdf.set_x(L)
+            pdf.cell(W, 9, _plain(stripped[2:].strip()), align="C",
+                     new_x="LMARGIN", new_y="NEXT")
             in_name_block = True
+
         elif stripped.startswith("## "):
             in_name_block = False
-            story.append(HRFlowable(width="100%", thickness=0.5,
-                                    color=colors.HexColor("#cccccc"), spaceAfter=2))
-            story.append(Paragraph(_md_inline(stripped[3:].strip().upper()), h2_s))
+            pdf.ln(3)
+            pdf.set_font("Helvetica", "B", 10.5)
+            pdf.set_x(L)
+            pdf.cell(W, 6, _plain(stripped[3:].strip()).upper(),
+                     new_x="LMARGIN", new_y="NEXT")
+            y = pdf.get_y()
+            pdf.line(L, y, L + W, y)
+            pdf.ln(1)
+
         elif stripped.startswith("### "):
             in_name_block = False
-            story.append(Paragraph(_md_inline(stripped[4:].strip()), h3_s))
+            pdf.set_font("Helvetica", "B", 10)
+            pdf.set_x(L)
+            pdf.cell(W, 5, _plain(stripped[4:].strip()),
+                     new_x="LMARGIN", new_y="NEXT")
+
         elif stripped.startswith(("- ", "* ")):
             in_name_block = False
-            story.append(Paragraph(f"• {_md_inline(stripped[2:].strip())}", bullet_s))
-        elif in_name_block:
-            story.append(Paragraph(_md_inline(stripped), contact_s))
-        else:
-            story.append(Paragraph(_md_inline(stripped), body_s))
+            pdf.set_font("Helvetica", "", 9.5)
+            pdf.set_x(L + 4)
+            pdf.multi_cell(W - 4, 4.5, f"- {_plain(stripped[2:].strip())}")
 
-    doc.build(story)
-    return buf.getvalue()
+        elif in_name_block:
+            pdf.set_font("Helvetica", "", 9)
+            pdf.set_x(L)
+            pdf.cell(W, 4.5, _plain(stripped), align="C",
+                     new_x="LMARGIN", new_y="NEXT")
+
+        else:
+            pdf.set_font("Helvetica", "", 9.5)
+            pdf.set_x(L)
+            pdf.multi_cell(W, 4.5, _plain(stripped))
+
+    return bytes(pdf.output())
 
 
 def send_delivery_email(
