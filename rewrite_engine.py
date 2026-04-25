@@ -664,9 +664,14 @@ def trigger_verify():
             headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
             timeout=10,
         )
+        try:
+            verify_body = vr.json()
+        except Exception:
+            verify_body = vr.text
         return jsonify({
             "domain_id": domain_id,
             "verify_status": vr.status_code,
+            "verify_body": verify_body,
             "domain_details": dr.json() if dr.status_code == 200 else {"error": dr.status_code},
         }), 200
     except Exception as e:
