@@ -1,0 +1,22 @@
+Jane Smith
+jane.smith@email.com | (555) 123-4567 | linkedin.com/in/janesmith
+
+SUMMARY
+Software engineer with 6 years experience building web applications.
+
+EXPERIENCE
+
+Senior Software Engineer - Acme Corp (2021-2024)
+- Responsible for maintaining backend services
+- Helped with system migrations
+- Worked on reducing costs
+
+Software Engineer - Startup Inc (2019-2021)
+- Responsible for frontend development
+- Assisted team with code reviews
+
+EDUCATION
+BS Computer Science, State University, 2019
+
+SKILLS
+Python, JavaScript, React, PostgreSQL, AWS
