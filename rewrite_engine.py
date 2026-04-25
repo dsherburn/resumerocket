@@ -27,7 +27,7 @@ except ImportError:
 
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
-FROM_EMAIL = "onboarding@resend.dev"
+FROM_EMAIL = os.environ.get("FROM_EMAIL", "results@tryresumerocket.com")
 
 RESUME_SYSTEM_PROMPT = """You are an expert resume writer with 15 years of experience helping professionals land roles at top companies. You write in clear, concise, achievement-focused language with strong action verbs and quantified results wherever possible.
 
