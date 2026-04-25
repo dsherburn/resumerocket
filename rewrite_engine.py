@@ -14,11 +14,16 @@ from email import encoders
 from io import BytesIO
 from pathlib import Path
 
+import html as html_lib
 import re
 
 import anthropic
 import httpx
-from fpdf import FPDF
+try:
+    from fpdf import FPDF
+    _FPDF_AVAILABLE = True
+except ImportError:
+    _FPDF_AVAILABLE = False
 
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
@@ -145,6 +150,63 @@ def optimize_linkedin(
     return message.content[0].text
 
 
+def _fmt_html(text: str) -> str:
+    """Escape HTML then apply markdown bold/italic inline."""
+    text = html_lib.escape(text)
+    text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
+    text = re.sub(r'\*(.*?)\*', r'<i>\1</i>', text)
+    return text
+
+
+def markdown_to_html(md: str) -> str:
+    """Convert markdown resume to inline-styled HTML suitable for email body."""
+    parts = [
+        '<div style="font-family:Arial,Helvetica,sans-serif;max-width:680px;'
+        'margin:0 auto;color:#1a1a1a;line-height:1.45;font-size:10pt;">'
+    ]
+    in_name_block = True
+
+    for line in md.strip().splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        if s.startswith("# "):
+            parts.append(
+                f'<h1 style="text-align:center;font-size:18pt;font-weight:700;'
+                f'margin:0 0 3px 0;">{_fmt_html(s[2:].strip())}</h1>'
+            )
+            in_name_block = True
+        elif s.startswith("## "):
+            in_name_block = False
+            parts.append(
+                f'<h2 style="font-size:9.5pt;font-weight:700;letter-spacing:1px;'
+                f'text-transform:uppercase;margin:14px 0 2px 0;padding-bottom:2px;'
+                f'border-bottom:1px solid #ccc;">{_fmt_html(s[3:].strip())}</h2>'
+            )
+        elif s.startswith("### "):
+            in_name_block = False
+            parts.append(
+                f'<p style="margin:6px 0 1px 0;font-weight:700;">'
+                f'{_fmt_html(s[4:].strip())}</p>'
+            )
+        elif s.startswith(("- ", "* ")):
+            in_name_block = False
+            parts.append(
+                f'<p style="margin:1px 0 1px 14px;">'
+                f'&bull; {_fmt_html(s[2:].strip())}</p>'
+            )
+        elif in_name_block:
+            parts.append(
+                f'<p style="text-align:center;margin:0 0 2px 0;'
+                f'color:#555;font-size:9pt;">{_fmt_html(s)}</p>'
+            )
+        else:
+            parts.append(f'<p style="margin:3px 0;">{_fmt_html(s)}</p>')
+
+    parts.append("</div>")
+    return "\n".join(parts)
+
+
 _UNICODE_MAP = {
     '—': '--', '–': '-', '‒': '-',
     '‘': "'", '’': "'", '‚': "'",
@@ -162,7 +224,9 @@ def _plain(text: str) -> str:
 
 
 def markdown_to_pdf(md: str) -> bytes:
-    """Convert markdown resume text to a formatted PDF using fpdf2."""
+    """Convert markdown resume text to a formatted PDF using fpdf2. Raises if unavailable."""
+    if not _FPDF_AVAILABLE:
+        raise RuntimeError("fpdf2 not installed")
     pdf = FPDF(format="Letter")
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=19)
@@ -231,36 +295,42 @@ def send_delivery_email(
     """Send the completed deliverables via Resend API."""
     subject = "Your ResumeRocket rewrite is ready 🚀"
 
-    try:
-        resume_pdf = markdown_to_pdf(rewritten_resume)
-        attach_name = "resume_rewritten.pdf"
-        attach_data = base64.b64encode(resume_pdf).decode()
-        attach_desc = "as a PDF"
-    except Exception as pdf_err:
-        print(f"PDF generation failed ({type(pdf_err).__name__}: {pdf_err}), sending as text")
-        attach_name = "resume_rewritten.txt"
-        attach_data = base64.b64encode(rewritten_resume.encode("utf-8")).decode()
-        attach_desc = "as a text file"
-
+    # Always embed the formatted resume in the email body
+    resume_html = markdown_to_html(rewritten_resume)
     linkedin_note = (
-        "<p>Your LinkedIn optimization is included as a separate attachment.</p>"
-        if linkedin_copy else ""
+        "<p>Your LinkedIn optimization is included below.</p>" if linkedin_copy else ""
     )
+    linkedin_section = ""
+    if linkedin_copy:
+        linkedin_section = (
+            "<hr style='margin:32px 0;border:none;border-top:1px solid #eee;'>"
+            "<h2 style='font-size:14pt;'>LinkedIn Optimization</h2>"
+            f"<pre style='white-space:pre-wrap;font-family:inherit;'>"
+            f"{html_lib.escape(linkedin_copy)}</pre>"
+        )
+
     body_html = f"""
-    <p>Hi {customer_name},</p>
-    <p>Your rewritten resume is attached {attach_desc}. Copy the content directly into your job applications.</p>
+    <p>Hi {html_lib.escape(customer_name)},</p>
+    <p>Your rewritten resume is below. You can also print this email to PDF (File &gt; Print &gt; Save as PDF) for a clean one-page document.</p>
     {linkedin_note}
-    <p>If you land interviews, we'd love to hear about it. If you're not happy for any reason, reply to this email for a full refund - no questions asked.</p>
+    <p>If you land interviews, reply and let us know. Not happy for any reason - reply for a full refund, no questions asked.</p>
     <p>Good luck,<br/>ResumeRocket</p>
+    <hr style="margin:24px 0;border:none;border-top:2px solid #eee;">
+    {resume_html}
+    {linkedin_section}
     """
 
-    attachments = [{"filename": attach_name, "content": attach_data}]
-
-    if linkedin_copy:
+    # Try to also attach a PDF; fall back gracefully if fpdf2 isn't available
+    attachments = []
+    try:
+        resume_pdf = markdown_to_pdf(rewritten_resume)
         attachments.append({
-            "filename": "linkedin_optimization.txt",
-            "content": base64.b64encode(linkedin_copy.encode()).decode(),
+            "filename": "resume_rewritten.pdf",
+            "content": base64.b64encode(resume_pdf).decode(),
         })
+        print("PDF attachment generated successfully")
+    except Exception as pdf_err:
+        print(f"PDF generation skipped ({type(pdf_err).__name__}: {pdf_err}) - resume in email body")
 
     payload = {
         "from": FROM_EMAIL,
