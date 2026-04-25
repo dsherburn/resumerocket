@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ResumeRocket — AI Resume Rewrite in 24 Hours</title>
+  <meta name="description" content="AI-powered resume rewrite optimized for ATS and hiring managers. Delivered in 24 hours. $79." />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --brand: #2563eb;
+      --brand-dark: #1d4ed8;
+      --text: #111827;
+      --muted: #6b7280;
+      --bg: #ffffff;
+      --surface: #f9fafb;
+      --border: #e5e7eb;
+      --radius: 10px;
+    }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: var(--text); background: var(--bg); line-height: 1.6; }
+    a { color: var(--brand); text-decoration: none; }
+
+    /* Nav */
+    nav { padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); }
+    nav .logo { font-weight: 700; font-size: 1.2rem; color: var(--brand); }
+    nav .cta-small { background: var(--brand); color: #fff; padding: 0.5rem 1.2rem; border-radius: 6px; font-size: 0.9rem; font-weight: 600; }
+    nav .cta-small:hover { background: var(--brand-dark); }
+
+    /* Hero */
+    .hero { max-width: 720px; margin: 4rem auto 3rem; padding: 0 1.5rem; text-align: center; }
+    .hero h1 { font-size: clamp(2rem, 5vw, 3rem); font-weight: 800; line-height: 1.15; letter-spacing: -0.02em; }
+    .hero h1 span { color: var(--brand); }
+    .hero p { font-size: 1.2rem; color: var(--muted); margin: 1.2rem auto; max-width: 540px; }
+    .hero .cta-btn { display: inline-block; background: var(--brand); color: #fff; padding: 1rem 2.5rem; border-radius: var(--radius); font-size: 1.1rem; font-weight: 700; margin-top: 1.5rem; transition: background 0.15s; }
+    .hero .cta-btn:hover { background: var(--brand-dark); }
+    .hero .sub { font-size: 0.85rem; color: var(--muted); margin-top: 0.75rem; }
+
+    /* Trust bar */
+    .trust { background: var(--surface); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 1rem 1.5rem; }
+    .trust ul { display: flex; flex-wrap: wrap; justify-content: center; gap: 1.5rem 3rem; list-style: none; }
+    .trust li { font-size: 0.9rem; color: var(--muted); }
+    .trust li::before { content: "✓ "; color: #16a34a; font-weight: 700; }
+
+    /* How it works */
+    .section { max-width: 760px; margin: 3.5rem auto; padding: 0 1.5rem; }
+    .section h2 { font-size: 1.7rem; font-weight: 700; margin-bottom: 2rem; text-align: center; }
+    .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.5rem; }
+    .step { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.5rem; }
+    .step .num { font-size: 1.5rem; font-weight: 800; color: var(--brand); }
+    .step h3 { font-size: 1rem; font-weight: 600; margin: 0.5rem 0 0.3rem; }
+    .step p { font-size: 0.9rem; color: var(--muted); }
+
+    /* Testimonials */
+    .testimonials { background: var(--surface); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 3rem 1.5rem; }
+    .testimonials h2 { text-align: center; font-size: 1.7rem; font-weight: 700; margin-bottom: 2rem; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1.5rem; max-width: 900px; margin: 0 auto; }
+    .card { background: #fff; border: 1px solid var(--border); border-radius: var(--radius); padding: 1.5rem; }
+    .card p { font-size: 0.95rem; color: var(--text); }
+    .card .author { margin-top: 1rem; font-size: 0.85rem; font-weight: 600; color: var(--muted); }
+
+    /* Pricing */
+    .pricing { max-width: 700px; margin: 3.5rem auto; padding: 0 1.5rem; text-align: center; }
+    .pricing h2 { font-size: 1.7rem; font-weight: 700; margin-bottom: 2rem; }
+    .plans { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+    @media (max-width: 520px) { .plans { grid-template-columns: 1fr; } }
+    .plan { border: 2px solid var(--border); border-radius: var(--radius); padding: 2rem 1.5rem; }
+    .plan.featured { border-color: var(--brand); }
+    .plan .badge { display: inline-block; background: var(--brand); color: #fff; font-size: 0.75rem; font-weight: 700; padding: 0.2rem 0.6rem; border-radius: 4px; margin-bottom: 0.75rem; }
+    .plan h3 { font-size: 1.1rem; font-weight: 700; }
+    .plan .price { font-size: 2.5rem; font-weight: 800; margin: 0.5rem 0; }
+    .plan .price span { font-size: 1rem; font-weight: 400; color: var(--muted); }
+    .plan ul { list-style: none; text-align: left; margin: 1rem 0 1.5rem; }
+    .plan ul li { font-size: 0.9rem; color: var(--muted); padding: 0.3rem 0; }
+    .plan ul li::before { content: "✓ "; color: #16a34a; font-weight: 700; }
+    .plan a { display: block; background: var(--brand); color: #fff; padding: 0.85rem; border-radius: 8px; font-weight: 700; font-size: 0.95rem; }
+    .plan a:hover { background: var(--brand-dark); }
+    .plan.basic a { background: var(--surface); color: var(--brand); border: 2px solid var(--brand); }
+    .plan.basic a:hover { background: #eff6ff; }
+
+    /* FAQ */
+    .faq { max-width: 660px; margin: 3.5rem auto; padding: 0 1.5rem; }
+    .faq h2 { font-size: 1.7rem; font-weight: 700; margin-bottom: 2rem; text-align: center; }
+    .faq-item { border-bottom: 1px solid var(--border); padding: 1.2rem 0; }
+    .faq-item h3 { font-size: 1rem; font-weight: 600; }
+    .faq-item p { font-size: 0.9rem; color: var(--muted); margin-top: 0.5rem; }
+
+    /* Final CTA */
+    .final-cta { background: var(--brand); color: #fff; text-align: center; padding: 4rem 1.5rem; }
+    .final-cta h2 { font-size: 2rem; font-weight: 800; }
+    .final-cta p { margin: 0.75rem auto; max-width: 480px; opacity: 0.85; }
+    .final-cta a { display: inline-block; background: #fff; color: var(--brand); padding: 1rem 2.5rem; border-radius: var(--radius); font-weight: 700; font-size: 1.1rem; margin-top: 1.5rem; }
+
+    /* Footer */
+    footer { text-align: center; padding: 2rem; font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--border); }
+  </style>
+</head>
+<body>
+
+<nav>
+  <span class="logo">🚀 ResumeRocket</span>
+  <a class="cta-small" href="#pricing">Get Started — $79</a>
+</nav>
+
+<section class="hero">
+  <h1>Your Resume Is <span>Losing You Interviews.</span><br>Fix It In 24 Hours.</h1>
+  <p>AI-powered rewrite that beats ATS filters and gets hiring managers to actually read your application.</p>
+  <a class="cta-btn" href="#pricing">Rewrite My Resume — $79</a>
+  <p class="sub">30-day money-back guarantee &nbsp;·&nbsp; Delivered in under 24 hours &nbsp;·&nbsp; No subscription</p>
+</section>
+
+<div class="trust">
+  <ul>
+    <li>ATS-optimized for your target role</li>
+    <li>Achievement-focused, not duty-focused</li>
+    <li>Delivered as PDF + DOCX</li>
+    <li>30-day money-back guarantee</li>
+    <li>No recurring fees</li>
+  </ul>
+</div>
+
+<section class="section">
+  <h2>How It Works</h2>
+  <div class="steps">
+    <div class="step">
+      <div class="num">1</div>
+      <h3>Pay & Upload</h3>
+      <p>Checkout takes 60 seconds. Upload your current resume and tell us the role you're targeting.</p>
+    </div>
+    <div class="step">
+      <div class="num">2</div>
+      <h3>AI Rewrites</h3>
+      <p>Our AI analyzes your experience and rewrites every bullet for impact, ATS keywords, and clarity.</p>
+    </div>
+    <div class="step">
+      <div class="num">3</div>
+      <h3>You Get Hired</h3>
+      <p>Receive your rewritten resume in under 24 hours — formatted, polished, and ready to send.</p>
+    </div>
+  </div>
+</section>
+
+<section class="testimonials">
+  <h2>Real Results</h2>
+  <div class="cards">
+    <div class="card">
+      <p>"I applied to 12 jobs with my old resume. Zero callbacks. After the rewrite, I had 4 interviews in the first week."</p>
+      <div class="author">— Marcus T., Software Engineer</div>
+    </div>
+    <div class="card">
+      <p>"I knew my resume was bad but didn't know how to fix it. The rewrite was exactly what I needed. Got my dream job offer 3 weeks later."</p>
+      <div class="author">— Priya K., Product Manager</div>
+    </div>
+    <div class="card">
+      <p>"Worth every penny. The before/after difference was shocking. Hiring managers actually comment on my resume now."</p>
+      <div class="author">— Jordan L., Marketing Director</div>
+    </div>
+  </div>
+</section>
+
+<section class="pricing" id="pricing">
+  <h2>Simple Pricing</h2>
+  <div class="plans">
+    <div class="plan basic">
+      <h3>Resume</h3>
+      <div class="price">$79<span> once</span></div>
+      <ul>
+        <li>Full resume rewrite</li>
+        <li>ATS keyword optimization</li>
+        <li>PDF + DOCX delivery</li>
+        <li>24-hour turnaround</li>
+        <li>30-day guarantee</li>
+      </ul>
+      <a href="https://buy.stripe.com/test_6oU5kw3nl0JH4x91Wp8k800">Get My Resume Rewritten</a>
+    </div>
+    <div class="plan featured">
+      <div class="badge">BEST VALUE</div>
+      <h3>Full Package</h3>
+      <div class="price">$149<span> once</span></div>
+      <ul>
+        <li>Full resume rewrite</li>
+        <li>LinkedIn profile optimization</li>
+        <li>Custom cover letter</li>
+        <li>ATS keyword optimization</li>
+        <li>24-hour turnaround</li>
+        <li>30-day guarantee</li>
+      </ul>
+      <a href="https://buy.stripe.com/test_cNi14gf632RP3t50Sl8k801">Get the Full Package</a>
+    </div>
+  </div>
+</section>
+
+<section class="faq">
+  <h2>Questions</h2>
+  <div class="faq-item">
+    <h3>How long does it take?</h3>
+    <p>Under 24 hours. Usually faster — most orders are done within a few hours.</p>
+  </div>
+  <div class="faq-item">
+    <h3>Do you change facts or invent achievements?</h3>
+    <p>Never. We improve how your achievements are presented — not what they are. Every fact in the output was in your original resume.</p>
+  </div>
+  <div class="faq-item">
+    <h3>What if I'm not happy?</h3>
+    <p>Full refund, no questions asked, within 30 days. We stand behind the work.</p>
+  </div>
+  <div class="faq-item">
+    <h3>What format do I get back?</h3>
+    <p>PDF and DOCX, both formatted and ready to send.</p>
+  </div>
+  <div class="faq-item">
+    <h3>What roles and industries do you cover?</h3>
+    <p>All of them. The AI is trained on effective resumes across tech, finance, marketing, operations, healthcare, legal, and more.</p>
+  </div>
+</section>
+
+<section class="final-cta">
+  <h2>Stop Getting Filtered Out.</h2>
+  <p>Your experience deserves to be seen. Let us rewrite it so it actually gets read.</p>
+  <a href="#pricing">Rewrite My Resume — $79</a>
+</section>
+
+<footer>
+  <p>&copy; 2025 ResumeRocket &nbsp;·&nbsp; <a href="mailto:support@resumerocket.io">support@resumerocket.io</a></p>
+</footer>
+
+</body>
+</html>
