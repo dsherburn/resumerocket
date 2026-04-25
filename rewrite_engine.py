@@ -370,18 +370,34 @@ def send_delivery_email(
         json=payload,
         timeout=30,
     )
-    if resp.status_code == 403 and FROM_EMAIL != FALLBACK_FROM_EMAIL:
-        print(f"Domain not verified for {FROM_EMAIL}, retrying with {FALLBACK_FROM_EMAIL}")
-        payload["from"] = FALLBACK_FROM_EMAIL
-        resp = httpx.post(
+    if resp.status_code == 403:
+        print(f"Customer send failed (403) for {customer_email}. Sending fallback to owner.")
+        fallback_payload = {
+            "from": FALLBACK_FROM_EMAIL,
+            "to": ["dsherburn@gmail.com"],
+            "subject": f"[ACTION NEEDED] ResumeRocket order for {customer_email}",
+            "html": (
+                f"<p><strong>A customer order needs to be forwarded manually.</strong></p>"
+                f"<p>Customer email: <strong>{html_lib.escape(customer_email)}</strong></p>"
+                f"<p>The domain tryresumerocket.com is not yet fully verified in Resend "
+                f"(SPF records missing from DNS). Forward the resume below to the customer.</p>"
+                f"<hr>"
+                f"{body_html}"
+            ),
+            "attachments": attachments,
+        }
+        fallback_resp = httpx.post(
             "https://api.resend.com/emails",
             headers={
                 "Authorization": f"Bearer {RESEND_API_KEY}",
                 "Content-Type": "application/json",
             },
-            json=payload,
+            json=fallback_payload,
             timeout=30,
         )
+        fallback_resp.raise_for_status()
+        print(f"Fallback notification sent to dsherburn@gmail.com for order: {customer_email}")
+        return
     resp.raise_for_status()
 
 
