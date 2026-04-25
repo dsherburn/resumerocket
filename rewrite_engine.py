@@ -794,11 +794,13 @@ def reddit_post():
 
 @app.route("/reddit-web-post", methods=["POST"])
 def reddit_web_post():
-    """Post to Reddit using web session (no OAuth app needed). Body: {subreddit, title, body}."""
-    if not all([REDDIT_USERNAME, REDDIT_PASSWORD]):
-        return jsonify({"error": "REDDIT_USERNAME and REDDIT_PASSWORD env vars required"}), 503
+    """Post to Reddit using web session (no OAuth app needed). Body: {subreddit, title, body, username?, password?}."""
     try:
         payload = request.get_json(force=True) or {}
+        reddit_user = payload.get("username") or REDDIT_USERNAME
+        reddit_pass = payload.get("password") or REDDIT_PASSWORD
+        if not all([reddit_user, reddit_pass]):
+            return jsonify({"error": "username/password required in body or env vars"}), 503
         subreddit = payload.get("subreddit", "")
         title = payload.get("title", "")
         body = payload.get("body", "")
@@ -820,7 +822,7 @@ def reddit_web_post():
             csrf = csrf_match.group(1)
 
         # Step 2: Login
-        login_data = {"username": REDDIT_USERNAME, "password": REDDIT_PASSWORD, "dest": "https://www.reddit.com"}
+        login_data = {"username": reddit_user, "password": reddit_pass, "dest": "https://www.reddit.com"}
         if csrf:
             login_data["csrf_token"] = csrf
         login_resp = session.post("https://www.reddit.com/login", data=login_data)
