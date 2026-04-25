@@ -14,8 +14,17 @@ from email import encoders
 from io import BytesIO
 from pathlib import Path
 
+import html
+import re
+
 import anthropic
 import httpx
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.platypus import HRFlowable, Paragraph, SimpleDocTemplate, Spacer
 
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
@@ -142,6 +151,67 @@ def optimize_linkedin(
     return message.content[0].text
 
 
+def _md_inline(text: str) -> str:
+    """Escape HTML then convert **bold** and *italic* to reportlab XML tags."""
+    text = html.escape(text)
+    text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
+    text = re.sub(r'\*(.*?)\*', r'<i>\1</i>', text)
+    return text
+
+
+def markdown_to_pdf(md: str) -> bytes:
+    """Convert markdown resume text to a formatted PDF."""
+    buf = BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=letter,
+        rightMargin=0.75 * inch, leftMargin=0.75 * inch,
+        topMargin=0.75 * inch, bottomMargin=0.75 * inch,
+    )
+
+    name_s = ParagraphStyle("name", fontSize=20, fontName="Helvetica-Bold",
+                            alignment=TA_CENTER, spaceAfter=2)
+    contact_s = ParagraphStyle("contact", fontSize=9, fontName="Helvetica",
+                               alignment=TA_CENTER, spaceAfter=6,
+                               textColor=colors.HexColor("#555555"))
+    h2_s = ParagraphStyle("h2", fontSize=10.5, fontName="Helvetica-Bold",
+                          spaceBefore=10, spaceAfter=2)
+    h3_s = ParagraphStyle("h3", fontSize=10, fontName="Helvetica-Bold",
+                          spaceBefore=5, spaceAfter=1)
+    bullet_s = ParagraphStyle("bullet", fontSize=9.5, leftIndent=14,
+                              spaceAfter=1, spaceBefore=1)
+    body_s = ParagraphStyle("body", fontSize=9.5, spaceAfter=3)
+
+    story = []
+    in_name_block = True
+
+    for line in md.strip().splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        if stripped.startswith("# "):
+            story.append(Paragraph(_md_inline(stripped[2:].strip()), name_s))
+            in_name_block = True
+        elif stripped.startswith("## "):
+            in_name_block = False
+            story.append(HRFlowable(width="100%", thickness=0.5,
+                                    color=colors.HexColor("#cccccc"), spaceAfter=2))
+            story.append(Paragraph(_md_inline(stripped[3:].strip().upper()), h2_s))
+        elif stripped.startswith("### "):
+            in_name_block = False
+            story.append(Paragraph(_md_inline(stripped[4:].strip()), h3_s))
+        elif stripped.startswith(("- ", "* ")):
+            in_name_block = False
+            story.append(Paragraph(f"• {_md_inline(stripped[2:].strip())}", bullet_s))
+        elif in_name_block:
+            story.append(Paragraph(_md_inline(stripped), contact_s))
+        else:
+            story.append(Paragraph(_md_inline(stripped), body_s))
+
+    doc.build(story)
+    return buf.getvalue()
+
+
 def send_delivery_email(
     customer_email: str,
     customer_name: str,
@@ -151,30 +221,38 @@ def send_delivery_email(
     """Send the completed deliverables via Resend API."""
     subject = "Your ResumeRocket rewrite is ready 🚀"
 
+    linkedin_note = (
+        "<p>Your LinkedIn optimization is included as a separate attachment.</p>"
+        if linkedin_copy else ""
+    )
     body_html = f"""
     <p>Hi {customer_name},</p>
-    <p>Your rewritten resume is attached as a PDF and DOCX. Copy it directly into your job applications.</p>
-    {"<p>Your LinkedIn optimization is included below the resume in the attached document.</p>" if linkedin_copy else ""}
-    <p>If you land interviews, we'd love to hear about it. If you're not happy for any reason, reply to this email for a full refund — no questions asked.</p>
+    <p>Your rewritten resume is attached as a PDF. Copy the content directly into your job applications.</p>
+    {linkedin_note}
+    <p>If you land interviews, we'd love to hear about it. If you're not happy for any reason, reply to this email for a full refund - no questions asked.</p>
     <p>Good luck,<br/>ResumeRocket</p>
     """
 
-    # Combine deliverables into a single markdown document
-    full_doc = f"# Rewritten Resume\n\n{rewritten_resume}"
+    resume_pdf = markdown_to_pdf(rewritten_resume)
+    attachments = [
+        {
+            "filename": "resume_rewritten.pdf",
+            "content": base64.b64encode(resume_pdf).decode(),
+        }
+    ]
+
     if linkedin_copy:
-        full_doc += f"\n\n---\n\n# LinkedIn Optimization\n\n{linkedin_copy}"
+        attachments.append({
+            "filename": "linkedin_optimization.txt",
+            "content": base64.b64encode(linkedin_copy.encode()).decode(),
+        })
 
     payload = {
         "from": FROM_EMAIL,
         "to": [customer_email],
         "subject": subject,
         "html": body_html,
-        "attachments": [
-            {
-                "filename": "resume_rewritten.md",
-                "content": base64.b64encode(full_doc.encode()).decode(),
-            }
-        ],
+        "attachments": attachments,
     }
 
     resp = httpx.post(
