@@ -6,12 +6,16 @@ Triggered by webhook from Tally form after Stripe payment confirmation.
 import os
 import json
 import base64
+import datetime
+import logging
 import smtplib
+import threading
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
 from io import BytesIO
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 import html as html_lib
@@ -29,8 +33,24 @@ ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 FROM_EMAIL = os.environ.get("FROM_EMAIL", "onboarding@resend.dev")
 FALLBACK_FROM_EMAIL = "onboarding@resend.dev"
+VERIFIED_FROM_EMAIL = "results@tryresumerocket.com"
+MONITORED_DOMAIN = "tryresumerocket.com"
 
 _last_error: dict = {}
+_orders_processed: int = 0
+_orders_failed: int = 0
+_counters_lock = threading.Lock()
+
+# Rotating error log — survives restarts, gives history
+_error_logger = logging.getLogger("resume_errors")
+_error_logger.setLevel(logging.ERROR)
+try:
+    _log_path = Path(os.environ.get("LOG_DIR", ".")) / "errors.log"
+    _rh = RotatingFileHandler(str(_log_path), maxBytes=5_000_000, backupCount=3, encoding="utf-8")
+    _rh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    _error_logger.addHandler(_rh)
+except Exception as _log_err:
+    logging.warning(f"Could not set up error log file: {_log_err}")
 
 RESUME_SYSTEM_PROMPT = """You are an expert resume writer with 15 years of experience helping professionals land roles at top companies. You write clear, concise, achievement-focused resumes that pass ATS screening and impress hiring managers.
 
@@ -312,8 +332,8 @@ def send_delivery_email(
     customer_name: str,
     rewritten_resume: str,
     linkedin_copy: str | None = None,
-) -> None:
-    """Send the completed deliverables via Resend API."""
+) -> bool:
+    """Send the completed deliverables via Resend API. Returns True on direct delivery, False on fallback."""
     subject = "Your ResumeRocket rewrite is ready 🚀"
 
     # Always embed the formatted resume in the email body
@@ -397,8 +417,9 @@ def send_delivery_email(
         )
         fallback_resp.raise_for_status()
         print(f"Fallback notification sent to dsherburn@gmail.com for order: {customer_email}")
-        return
+        return False
     resp.raise_for_status()
+    return True
 
 
 def process_order(order: dict) -> None:
@@ -440,20 +461,26 @@ def process_order(order: dict) -> None:
             resume_text=resume_text,
         )
 
-    send_delivery_email(
+    direct = send_delivery_email(
         customer_email=order["customer_email"],
         customer_name=order["customer_name"],
         rewritten_resume=rewritten,
         linkedin_copy=linkedin_copy,
     )
 
-    print(f"Delivered to {order['customer_email']}")
+    global _orders_processed, _orders_failed
+    with _counters_lock:
+        if direct:
+            _orders_processed += 1
+        else:
+            _orders_failed += 1
+
+    print(f"Delivered to {order['customer_email']} (direct={direct})")
 
 
 # --- Webhook handler (Flask) ---
 # Drop this behind a Vercel serverless function or Railway app
 
-import threading
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
@@ -518,13 +545,19 @@ def process_tally_payload(payload: dict) -> None:
         process_order(order)
 
     except Exception as e:
-        import traceback, datetime
+        import traceback
         err_msg = f"{type(e).__name__}: {e}"
+        tb = traceback.format_exc()
+        ts = datetime.datetime.utcnow().isoformat()
         print(f"ERROR in process_tally_payload: {err_msg}")
         traceback.print_exc()
         _last_error["message"] = err_msg
-        _last_error["traceback"] = traceback.format_exc()
-        _last_error["at"] = datetime.datetime.utcnow().isoformat()
+        _last_error["traceback"] = tb
+        _last_error["at"] = ts
+        _error_logger.error("process_tally_payload failed\n%s\n%s", err_msg, tb)
+        global _orders_failed
+        with _counters_lock:
+            _orders_failed += 1
 
 
 @app.route("/webhook/tally", methods=["POST"])
@@ -567,12 +600,73 @@ def diagnose():
     results["fallback_from_email"] = FALLBACK_FROM_EMAIL
     results["anthropic_key_prefix"] = ANTHROPIC_API_KEY[:20] + "..." if ANTHROPIC_API_KEY else "NOT SET"
     results["last_error"] = _last_error if _last_error else None
+    with _counters_lock:
+        results["orders_processed_session"] = _orders_processed
+        results["orders_failed_session"] = _orders_failed
     return jsonify(results), 200
 
 
 @app.route("/last-error", methods=["GET"])
 def last_error():
     return jsonify(_last_error if _last_error else {"message": "no errors recorded"}), 200
+
+
+def _check_resend_domain() -> tuple[bool, bool]:
+    """Returns (resend_ok, domain_verified). Also auto-upgrades FROM_EMAIL when verified."""
+    global FROM_EMAIL
+    try:
+        r = httpx.get(
+            "https://api.resend.com/domains",
+            headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
+            timeout=10,
+        )
+        if r.status_code != 200:
+            return False, False
+        domains = r.json().get("data", [])
+        verified = any(
+            d.get("name") == MONITORED_DOMAIN and d.get("status") == "verified"
+            for d in domains
+        )
+        if verified and FROM_EMAIL != VERIFIED_FROM_EMAIL:
+            FROM_EMAIL = VERIFIED_FROM_EMAIL
+            print(f"Domain {MONITORED_DOMAIN} verified — FROM_EMAIL upgraded to {VERIFIED_FROM_EMAIL}")
+        return True, verified
+    except Exception as e:
+        print(f"_check_resend_domain error: {e}")
+        return False, False
+
+
+@app.route("/status", methods=["GET"])
+def status():
+    """Monitoring summary used by the Paperclip health-check routine."""
+    anthropic_ok = False
+    try:
+        import anthropic as _ant
+        c = _ant.Anthropic(api_key=ANTHROPIC_API_KEY)
+        c.messages.create(
+            model="claude-haiku-4-5-20251001", max_tokens=5,
+            messages=[{"role": "user", "content": "ping"}],
+        )
+        anthropic_ok = True
+    except Exception:
+        pass
+
+    resend_ok, domain_verified = _check_resend_domain()
+
+    with _counters_lock:
+        processed = _orders_processed
+        failed = _orders_failed
+
+    return jsonify({
+        "backend": "ok",
+        "anthropic": anthropic_ok,
+        "resend": resend_ok,
+        "email_domain_verified": domain_verified,
+        "last_error": _last_error if _last_error else None,
+        "orders_processed_session": processed,
+        "orders_failed_session": failed,
+        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+    }), 200
 
 
 if __name__ == "__main__":
