@@ -231,26 +231,28 @@ def send_delivery_email(
     """Send the completed deliverables via Resend API."""
     subject = "Your ResumeRocket rewrite is ready 🚀"
 
+    try:
+        resume_pdf = markdown_to_pdf(rewritten_resume)
+        attach_name = "resume_rewritten.pdf"
+        attach_data = base64.b64encode(resume_pdf).decode()
+        attach_desc = "as a PDF"
+    except Exception as pdf_err:
+        print(f"PDF generation failed ({type(pdf_err).__name__}: {pdf_err}), sending as text")
+        attach_name = "resume_rewritten.txt"
+        attach_data = base64.b64encode(rewritten_resume.encode("utf-8")).decode()
+        attach_desc = "as a text file"
+
     linkedin_note = (
         "<p>Your LinkedIn optimization is included as a separate attachment.</p>"
         if linkedin_copy else ""
     )
     body_html = f"""
     <p>Hi {customer_name},</p>
-    <p>Your rewritten resume is attached as a PDF. Copy the content directly into your job applications.</p>
+    <p>Your rewritten resume is attached {attach_desc}. Copy the content directly into your job applications.</p>
     {linkedin_note}
     <p>If you land interviews, we'd love to hear about it. If you're not happy for any reason, reply to this email for a full refund - no questions asked.</p>
     <p>Good luck,<br/>ResumeRocket</p>
     """
-
-    try:
-        resume_pdf = markdown_to_pdf(rewritten_resume)
-        attach_name = "resume_rewritten.pdf"
-        attach_data = base64.b64encode(resume_pdf).decode()
-    except Exception as pdf_err:
-        print(f"PDF generation failed ({type(pdf_err).__name__}: {pdf_err}), sending as text")
-        attach_name = "resume_rewritten.txt"
-        attach_data = base64.b64encode(rewritten_resume.encode("utf-8")).decode()
 
     attachments = [{"filename": attach_name, "content": attach_data}]
 
